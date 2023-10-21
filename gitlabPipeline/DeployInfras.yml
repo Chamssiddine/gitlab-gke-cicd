@@ -1,0 +1,45 @@
+stages:
+  - validate
+  - plan
+  - apply
+  - destroy
+image:
+  name: hashicorp/terraform:light
+  entrypoint:
+    - '/usr/bin/env'
+    - 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+  
+before_script:
+  - cd infrastructure
+  - rm -rf .terraform
+  - terraform init
+  - terraform --version
+validate:
+  stage: validate
+  script:
+    - terraform validate
+plan:
+  stage: plan
+  script:
+    - terraform plan
+  dependencies:
+    - validate
+  artifacts:
+    paths:
+      - planfile
+apply:
+  stage: apply
+  script:
+    - terraform apply -auto-approve
+  dependencies:
+    - plan
+  only:
+    variables:
+      - $ACTION == "DEPLOY"
+destroy_eks:
+  stage: destroy
+  script:
+    - terraform destroy -auto-approve
+  only:
+    variables:
+      - $ACTION == "DESTROY"

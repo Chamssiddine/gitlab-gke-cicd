@@ -1,5 +1,10 @@
 stages:
+  - check_cluster
+  - trigger
   - build
+  - deploy
+  - cleanup
+  - destroy_gke
 
 variables:
   # Define variables here
@@ -8,6 +13,7 @@ variables:
   REPO_NAME: "chamssiddine01"
   IMAGE_NAME: "rdedoc"
   TAG: "$CI_COMMIT_REF_NAME-$CI_COMMIT_SHA"
+  GKE_CLUSTER_NAME: "primary"
 
 before_script:
   - echo "Logging into Google Cloud..."
@@ -16,13 +22,66 @@ before_script:
   - gcloud config set project "$PROJECT_ID"
   - gcloud auth configure-docker "us-docker.pkg.dev"
 
+verify_gke_cluster:
+  stage: check_cluster
+  image: registry.gitlab.com/gitlab-org/cloud-deploy/aws-base:latest
+  script:
+    - gcloud container clusters list --region us-central1-a | jq -r ".clusters" | grep $GKE_CLUSTER_NAME
+
+trigger_pipeline:
+  stage: trigger
+  variables:
+    ACTION: DEPLOY
+  trigger:
+    project: chamseddine.abderrahim/gke-cluster
+    branch: main
+    strategy: depend
+  rules:
+    - when: on_failure
+
 build_image:
   stage: build
+  image: docker:20.10.16
+  services:
+    - docker:20.10.16-dind
   script:
-    - echo "Building Docker image..."
     - docker build -t "us-docker.pkg.dev/$PROJECT_ID/$REPO_NAME/$IMAGE_NAME:$TAG" .
     - echo "Pushing Docker image to Google Artifact Registry..."
     - docker push "us-docker.pkg.dev/$PROJECT_ID/$REPO_NAME/$IMAGE_NAME:$TAG"
+  when: always
 
-only:
-  - branches
+deploy_to_gke:
+  stage: deploy
+  image: registry.gitlab.com/gitlab-org/cloud-deploy/aws-base:latest
+  script:
+    - gcloud container clusters get-credentials primary --zone us-central1-a --project caramel-vine-393909
+    - curl -LO https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl
+    - chmod +x ./kubectl && mv ./kubectl /usr/local/bin/kubectl
+    - kubectl apply -f manifests/deployment.yaml 
+    - bash scripts/getsvc.bash
+  needs:
+    - build_image
+
+cleanup_deployment:
+  stage: cleanup
+  image: registry.gitlab.com/gitlab-org/cloud-deploy/aws-base:latest
+  script:
+    - gcloud container clusters get-credentials primary --zone us-central1-a --project caramel-vine-393909
+    - curl -LO https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl
+    - chmod +x ./kubectl && mv ./kubectl /usr/local/bin/kubectl
+    - kubectl delete -f manifests/deployment.yaml 
+  when: manual
+  needs:
+    - deploy_to_gke
+
+destroy_gke_cluster:
+  stage: destroy_gke
+  variables:
+    ACTION: DESTROY
+  trigger:
+    project: chamseddine.abderrahim/gke-cluster
+    branch: main
+    strategy: depend
+  when: manual
+  needs:
+    - cleanup_deployment
