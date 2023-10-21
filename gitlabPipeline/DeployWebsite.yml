@@ -1,0 +1,28 @@
+stages:
+  - build
+
+variables:
+  # Define variables here
+  PROJECT_ID: "caramel-vine-393909"
+  REGION: "eu-west9-a"
+  REPO_NAME: "chamssiddine01"
+  IMAGE_NAME: "rdedoc"
+  TAG: "$CI_COMMIT_REF_NAME-$CI_COMMIT_SHA"
+
+before_script:
+  - echo "Logging into Google Cloud..."
+  - echo "$GCLOUD_SERVICE_KEY" | base64 -d > "$HOME"/gcloud-service-key.json
+  - gcloud auth activate-service-account --key-file="$HOME"/gcloud-service-key.json
+  - gcloud config set project "$PROJECT_ID"
+  - gcloud auth configure-docker "us-docker.pkg.dev"
+
+build_image:
+  stage: build
+  script:
+    - echo "Building Docker image..."
+    - docker build -t "us-docker.pkg.dev/$PROJECT_ID/$REPO_NAME/$IMAGE_NAME:$TAG" .
+    - echo "Pushing Docker image to Google Artifact Registry..."
+    - docker push "us-docker.pkg.dev/$PROJECT_ID/$REPO_NAME/$IMAGE_NAME:$TAG"
+
+only:
+  - branches
